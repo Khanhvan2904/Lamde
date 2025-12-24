@@ -1,114 +1,70 @@
 import streamlit as st
+import google.generativeai as genai
 from docx import Document
-import io
-import random
-import re
+import io, random, re
 
-# --- HÀM HỖ TRỢ XỬ LÝ DOCX ---
-def get_questions_from_docx(file):
-    """Chia nhỏ nội dung file Word thành danh sách các câu hỏi dựa trên chữ 'Câu'"""
+# --- CẤU HÌNH AI ---
+genai.configure(api_key="MÃ_API_CỦA_BẠN")
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+def extract_questions_via_ai(file):
+    """Sử dụng AI để nhận diện danh sách câu hỏi chính xác nhất"""
     doc = Document(file)
-    questions = []
-    current_q = []
+    full_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
     
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        # Nếu gặp chữ "Câu [số]" thì bắt đầu câu mới
-        if re.match(r'^Câu\s*\d+', text, re.IGNORECASE):
-            if current_q:
-                questions.append(current_q)
-            current_q = [para] # Lưu cả đối tượng paragraph để giữ định dạng
-        else:
-            if current_q:
-                current_q.append(para)
-                
-    if current_q:
-        questions.append(current_q)
-    return questions
+    prompt = f"""
+    Phân tích văn bản sau và chia nó thành danh sách các câu hỏi riêng biệt.
+    Mỗi câu hỏi phải bao gồm cả nội dung câu hỏi và các phương án trả lời đi kèm.
+    Chỉ trả về danh sách, mỗi câu hỏi cách nhau bởi ký tự '###'.
+    Nội dung: {full_text[:30000]}
+    """
+    response = model.generate_content(prompt)
+    # Chia nhỏ kết quả dựa trên ký tự ngăn cách của AI
+    questions = response.text.split('###')
+    return [q.strip() for q in questions if len(q.strip()) > 10]
 
-def create_docx_output(selected_questions, version_code):
-    """Tạo file Word mới từ danh sách câu hỏi đã chọn"""
-    new_doc = Document()
-    new_doc.add_heading(f'MÃ ĐỀ THI: {version_code}', 0)
+def create_final_docx(selected_qs):
+    doc = Document()
+    for i, q_text in enumerate(selected_qs):
+        # Đánh lại số câu tự động
+        clean_text = re.sub(r'^Câu\s*\d+[:\.]?', f'Câu {i+1}:', q_text, flags=re.IGNORECASE)
+        doc.add_paragraph(clean_text)
+        doc.add_paragraph("-" * 20)
     
-    global_q_num = 1
-    for q_group in selected_questions:
-        for i, para in enumerate(q_group):
-            new_p = new_doc.add_paragraph()
-            # Copy nội dung và định dạng đơn giản
-            text = para.text
-            if i == 0: # Dòng đầu tiên của câu hỏi
-                text = re.sub(r'^Câu\s*\d+', f'Câu {global_q_num}', text, flags=re.IGNORECASE)
-            new_p.text = text
-        global_q_num += 1
-        new_doc.add_paragraph("") # Khoảng trống giữa các câu
-        
-    buffer = io.BytesIO()
-    new_doc.save(buffer)
-    buffer.seek(0)
-    return buffer
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
 
-# --- GIAO DIỆN STREAMLIT ---
-st.set_page_config(page_title="Hệ thống Tạo Đề Ngẫu Nhiên", layout="wide")
-st.title("🎯 Hệ thống Trích xuất & Tạo Đề Thi Tự Động")
+# --- GIAO DIỆN ---
+st.title("🎯 Trình Tạo Đề Thi Thông Minh")
 
 with st.sidebar:
-    st.header("⚙️ Cấu hình đề thi")
-    num_versions = st.number_input("Số lượng mã đề cần tạo", min_value=1, max_value=20, value=1)
-    
-    st.divider()
-    n_multi = st.number_input("Số câu Trắc nghiệm nhiều lựa chọn", min_value=0, value=12)
-    n_tf = st.number_input("Số câu Trắc nghiệm Đúng/Sai", min_value=0, value=4)
-    n_short = st.number_input("Số câu Trắc nghiệm Trả lời ngắn", min_value=0, value=6)
+    n_multi = st.number_input("Số câu Dạng 1", value=10)
+    n_tf = st.number_input("Số câu Dạng 2", value=4)
+    n_short = st.number_input("Số câu Dạng 3", value=6)
 
-# Giao diện Upload 3 vùng riêng biệt
 col1, col2, col3 = st.columns(3)
+f1 = col1.file_uploader("Ngân hàng Dạng 1", type=['docx'])
+f2 = col2.file_uploader("Ngân hàng Dạng 2", type=['docx'])
+f3 = col3.file_uploader("Ngân hàng Dạng 3", type=['docx'])
 
-with col1:
-    st.subheader("1. Nhiều lựa chọn")
-    file_multi = st.file_uploader("Upload ngân hàng Dạng 1", type=["docx"], key="multi")
-
-with col2:
-    st.subheader("2. Đúng/Sai")
-    file_tf = st.file_uploader("Upload ngân hàng Dạng 2", type=["docx"], key="tf")
-
-with col3:
-    st.subheader("3. Trả lời ngắn")
-    file_short = st.file_uploader("Upload ngân hàng Dạng 3", type=["docx"], key="short")
-
-# --- LOGIC XỬ LÝ CHÍNH ---
-if st.button("🚀 Bắt đầu tạo đề thi", type="primary"):
-    if file_multi and file_tf and file_short:
-        # Bước 1: Trích xuất câu hỏi từ 3 nguồn
-        bank_multi = get_questions_from_docx(file_multi)
-        bank_tf = get_questions_from_docx(file_tf)
-        bank_short = get_questions_from_docx(file_short)
-        
-        # Kiểm tra số lượng
-        if len(bank_multi) < n_multi or len(bank_tf) < n_tf or len(bank_short) < n_short:
-            st.error("❌ Số lượng câu hỏi trong ngân hàng không đủ so với yêu cầu!")
-        else:
-            st.success(f"✅ Đã tải: {len(bank_multi)} câu TN, {len(bank_tf)} câu Đ/S, {len(bank_short)} câu ngắn.")
+if st.button("🚀 Tạo Đề Ngẫu Nhiên"):
+    if f1 and f2 and f3:
+        with st.spinner("AI đang phân tích ngân hàng câu hỏi..."):
+            bank1 = extract_questions_via_ai(f1)
+            bank2 = extract_questions_via_ai(f2)
+            bank3 = extract_questions_via_ai(f3)
             
-            # Bước 2: Tạo từng mã đề
-            for v in range(num_versions):
-                v_code = 101 + v
+            # Hiển thị số lượng AI tìm được để kiểm tra
+            st.write(f"Tìm thấy: Dạng 1 ({len(bank1)} câu), Dạng 2 ({len(bank2)} câu), Dạng 3 ({len(bank3)} câu)")
+            
+            if len(bank1) >= n_multi and len(bank2) >= n_tf and len(bank3) >= n_short:
+                final_selection = random.sample(bank1, n_multi) + \
+                                  random.sample(bank2, n_tf) + \
+                                  random.sample(bank3, n_short)
                 
-                # Lấy ngẫu nhiên theo số lượng yêu cầu
-                selected = (
-                    random.sample(bank_multi, n_multi) +
-                    random.sample(bank_tf, n_tf) +
-                    random.sample(bank_short, n_short)
-                )
-                
-                # Bước 3: Build file docx
-                docx_file = create_docx_output(selected, v_code)
-                
-                st.download_button(
-                    label=f"📥 Tải xuống Mã đề {v_code}",
-                    data=docx_file,
-                    file_name=f"Ma_De_{v_code}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-    else:
-        st.warning("⚠️ Vui lòng upload đầy đủ cả 3 tệp ngân hàng câu hỏi.")
+                final_doc = create_final_docx(final_selection)
+                st.download_button("📥 Tải Đề Thi (.docx)", final_doc, "De_Thi_Random.docx")
+            else:
+                st.error("Số lượng câu hỏi AI nhận diện được vẫn ít hơn yêu cầu. Hãy kiểm tra lại file gốc.")
