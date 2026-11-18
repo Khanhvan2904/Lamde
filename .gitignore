@@ -1,0 +1,36 @@
+node_modules/
+dist/
+build/runtime/
+build/_packout/
+.workbuddy/
+test/out/
+test/fixtures/
+test/*.png
+test/shot*.png
+*.log
+*.zip
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# 运行时产物（本地下载，不入库）：二进制、镜像、AVD 数据一律排除
+engine/qemu/
+engine/emulator/
+engine/system-images/
+engine/platform-tools/
+engine/avd/
+engine/aehd/
+engine/_dl/
+engine/_tools/
+engine/*.iso
+engine/*.img
+engine/*.qcow2
+tools/platform-tools/adb.exe
+tools/platform-tools/*.dll
+
+# 商店截图脚本的中间产物（可随时重生成）
+docs/store-shots/raw-*.png
+
+# 调试用截图 / 临时产物（不入库）
+build/_test/

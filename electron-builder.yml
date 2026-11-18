@@ -1,0 +1,115 @@
+appId: com.apkstart.win
+productName: ApkStart
+copyright: Copyright © 2026 ApkStart
+
+directories:
+  output: dist/release
+  buildResources: build
+
+# 只带运行需要的文件，源码目录整块进包（无 asar：窗口代理要用真实的 .ps1 路径）
+asar: false
+files:
+  - src/**/*
+  - package.json
+  - LICENSE
+  - "!**/*.map"
+  - "!**/node_modules/**"
+  # 运行时解压 .xz 镜像用（NAPI 预编译，无 ABI 问题）
+  - "node_modules/@napi-rs/lzma/**"
+  - "node_modules/@napi-rs/lzma-win32-x64-msvc/**"
+  - "!node_modules/@napi-rs/lzma/*.md"
+  - "!node_modules/@napi-rs/lzma/*.ts"
+  - "!node_modules/@napi-rs/lzma/browser-entry.*"
+
+# 只保留中英文界面语言（Electron locales 从 41MB 降到 ~3MB）
+electronLanguages:
+  - zh-CN
+  - zh-TW
+  - en-US
+
+# 完整运行时（emulator + platform-tools + 系统镜像），由 build/prepare-runtime.js 生成。
+# 打进包里之后首次启动不再需要任何下载。
+extraResources:
+  - from: build/runtime
+    to: runtime
+    filter:
+      - "**/*"
+      - "!.prepared"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: src/ui/assets/appicon.ico
+  # 安装到当前用户目录，不写系统盘、不要求管理员权限
+  requestedExecutionLevel: asInvoker
+
+# ---------------- 微软商店（MSIX） ----------------
+# appx 目标不在默认构建列表里：它只有出商店包时才用（npm run build:appx），
+# 平时 npm run build:exe 仍然只出 NSIS 安装包。
+#
+# identityName / publisher 必须逐字等于 Partner Center →
+#   Product management → Product identity 里的
+#   Package/Identity/Name 与 Package/Identity/Publisher。
+# 下面这两个值是 2026-11-16 从 Partner Center 抄下来的确认值；
+# 换产品身份时改这里（或设 APKSTART_MSIX_IDENTITY / APKSTART_MSIX_PUBLISHER）。
+# 注意：占位 Publisher（CN=RoutineMiku）打出来的包商店会直接拒收。
+appx:
+  identityName: RoutineMiku.ApkStart
+  publisher: "CN=58CA1DED-8AB3-4D0D-AF50-62C9B781AA4D"
+  publisherDisplayName: RoutineMiku
+  displayName: ApkStart
+  applicationId: ApkStart
+  # 全信任桌面应用唯一必需的能力。不要加 unvirtualizedResources /
+  # broadFileSystemAccess —— Store 基本不批，而且本应用靠「数据目录挪到
+  # %USERPROFILE%\ApkStart」绕开了 AppData 写重定向，不需要它们。
+  capabilities:
+    - runFullTrust
+  languages:
+    - zh-CN
+    - en-US
+  minVersion: 10.0.19041.0
+  maxVersionTested: 10.0.22621.0
+
+nsis:
+  # 不再是「一键装到 C 盘默认目录」：改为标准向导，允许用户选择安装位置
+  # （装到非系统盘可减轻 C 盘压力；运行时数据目录另在设置里单独指定）。
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  displayLanguageSelector: false
+  # always：即使桌面上已有同名 .lnk 也重建一次。
+  # 默认的 true 只在「不存在」时才创建，某些机器上（安全软件拦截、桌面被
+  # OneDrive 重定向、旧版残留了指向已删目录的坏快捷方式）会出现装完没图标，
+  # 或者图标还指着旧 exe。always 保证每次安装后都指向当前安装目录。
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  artifactName: ApkStart-${version}-Setup.exe
+  # 卸载前先结束仍在运行的运行时进程，避免文件被锁导致无法删除
+  # （火绒等粉碎工具删不掉，多半是 qemu/adb 进程还驻留）。
+  include: build/installer.nsh
+  # 安装包本身已含完整运行时（emulator + 系统镜像 .gz），装完首次启动
+  # 自动把镜像展开到用户目录，之后不再联网下载任何东西。
+
+# 压缩级别：normal（zlib）。镜像本身已是 xz/gz，NSIS 这层只压 Electron 的 dll，
+# normal 与 maximum 体积差别很小，但 maximum(LZMA) 会让打安装包慢十几分钟。
+# 注：CI 用 PowerShell 跑 npx 时，行内 -c.compression=xxx 会被拆参、被当成配置文件路径，
+# 因此压缩级别统一在这里设置，不在 workflow 里用 -c 行内覆盖。
+compression: normal
+
+# ---------------- Linux / FydeOS ----------------
+# 这一段原来写在 package.json 的 "build" 字段里。electron-builder 26 的 schema
+# 已经不再接受 linux.desktop 那个形状，导致任何一次构建（包括 Windows）都在
+# 配置校验阶段直接失败。统一搬到这个文件、用 --config electron-builder.yml
+# 显式指定，就不会再被 package.json 里的旧配置抢走。
+linux:
+  target:
+    - AppImage
+  category: Utility
+  icon: src/ui/assets/logo-128.png
+  desktop:
+    entry:
+      Name: ApkStart
+      Comment: 在 FydeOS / Linux 上管理安卓应用
+      Categories: Utility;
